@@ -77,14 +77,14 @@ int main(int argc, char** argv)
         0.0, 0.0,
         0.0, 0.0, 0.0,
         
-        (GLfloat)w, 0.0,
-        1.0, 0.0, 0.0,
+        0.0, (GLfloat)h,
+        0.0, (GLfloat)h, 0.0,
         
         (GLfloat)w, (GLfloat)h,
-        1.0, 1.0, 0.0,
+        (GLfloat)w, (GLfloat)h, 0.0,
         
-        0.0, (GLfloat)h,
-        0.0, 1.0, 0.0
+        (GLfloat)w, 0.0,
+        (GLfloat)w, 0.0, 0.0
     };
     GLuint vbo;
 	glGenBuffers(1, &vbo);
@@ -100,6 +100,9 @@ int main(int argc, char** argv)
     CHK_OGL;
     
     /* draw it */
+    glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
+    CHK_OGL;
+    CHK_FBO;
     glEnable(GL_TEXTURE_RECTANGLE_ARB);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, imgTex);
@@ -114,6 +117,7 @@ int main(int argc, char** argv)
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, fboTex);
     CHK_OGL;
     CFMutableDataRef cfData = CFDataCreateMutable(NULL, w * h * 4);
+    CFDataSetLength(cfData, w * h * 4);
     glGetTexImage(
         GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
         GL_UNSIGNED_INT_8_8_8_8_REV, CFDataGetMutableBytePtr(cfData));

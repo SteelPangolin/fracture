@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h> 
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
@@ -9,6 +12,9 @@
 
 GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* pathBytes);
 GLuint createEmptyTexture(CGLContextObj cgl_ctx, size_t w, size_t h);
+void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes);
+
+void reportGenericError(char *file, const char* func, unsigned long line, char* msg, char* detail);
 
 void checkCGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line, CGLError error);
 #define CHK_CGL(fn) (checkCGLError(cgl_ctx, __FILE__, __func__, __LINE__, (fn)))
@@ -19,7 +25,16 @@ void checkOGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned
 void checkFramebufferError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line);
 #define CHK_FBO (checkFramebufferError(cgl_ctx, __FILE__, __func__, __LINE__))
 
+#define ERR(msg, detail) reportGenericError(__FILE__, __func__, __LINE__, (msg), (detail))
+#define CHK_SYSCALL(fn, msg, detail) if ((fn) == -1) ERR(msg, detail)
+#define CHK_NULL(ptr, msg, detail) if ((ptr) == NULL) ERR(msg, detail)
+
 void dumpPixFmt(CGLContextObj cgl_ctx, CGLPixelFormatObj pix);
+
+void printProgramInfoLog(CGLContextObj cgl_ctx, GLuint obj);
+void printShaderInfoLog(CGLContextObj cgl_ctx, GLuint obj);
+GLuint loadProgram(CGLContextObj cgl_ctx, char* vertProgPath, char* fragProgPath);
+GLuint loadShader(CGLContextObj cgl_ctx, GLenum shaderType, char* filePath);
 
 int main(int argc, char** argv)
 {
@@ -60,6 +75,13 @@ int main(int argc, char** argv)
         GL_RENDERBUFFER_EXT, renderbuffer);
     CHK_OGL;
     CHK_FBO;
+    
+    /* set up shader */
+    GLuint program = loadProgram(cgl_ctx, "../src/test.vert", "../src/test.frag");
+    glUseProgram(program);
+    GLuint imgTexLoc = glGetUniformLocation(program, "imgTex");
+    glUniform1i(imgTexLoc, 0); /* GL_TEXTURE0 */
+    CHK_OGL;
     
     /* set up render area */
     glViewport(0, 0, w, h);
@@ -114,44 +136,23 @@ int main(int argc, char** argv)
     CHK_OGL;
     
     /* get the results */
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, fboTex);
-    CHK_OGL;
-    CFMutableDataRef cfData = CFDataCreateMutable(NULL, w * h * 4);
-    CFDataSetLength(cfData, w * h * 4);
-    glGetTexImage(
-        GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
-        GL_UNSIGNED_INT_8_8_8_8_REV, CFDataGetMutableBytePtr(cfData));
-    CHK_OGL;
-    CGDataProviderRef dataProvider = CGDataProviderCreateWithCFData(cfData);
-    CGColorSpaceRef colorspace = CGColorSpaceCreateDeviceRGB();
-    CGImageRef resultImg = CGImageCreate(
-        w, h, 8, 4 * 8, 4 * w, colorspace,
-        kCGBitmapByteOrder32Host | kCGImageAlphaFirst,
-        dataProvider, NULL, false, kCGRenderingIntentDefault);
-    char* pathBytes = "out.png";
-    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
-        NULL, (unsigned char*)pathBytes, strlen(pathBytes), false);
-    CGImageDestinationRef imgDst = CGImageDestinationCreateWithURL(url, kUTTypePNG, 1, NULL);
-    CGImageDestinationAddImage(imgDst, resultImg, NULL);
-    CGImageDestinationFinalize(imgDst);
-    
-    CFRelease(cfData);
-    CGDataProviderRelease(dataProvider);
-    CGColorSpaceRelease(colorspace);
-    CGImageRelease(resultImg);
-    CFRelease(url);
-    CFRelease(imgDst);
+    saveTexture(cgl_ctx, fboTex, w, h, "out.png");
     
     printf("ok\n");
     return EXIT_SUCCESS;
+}
+
+void reportGenericError(char *file, const char* func, unsigned long line, char* msg, char* detail)
+{
+    printf("%s:%s:%d %s: %s\n", file, func, line, msg, detail);
+    exit(EXIT_FAILURE);
 }
 
 void checkCGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line, CGLError error)
 {
     if (error != kCGLNoError)
     {
-        printf("%s:%s:%d CGL error: %s\n", file, func, line, CGLErrorString(error));
-        exit(EXIT_FAILURE);
+        reportGenericError(file, func, line, "CGL error", (char*)CGLErrorString(error));
     }
 }
 
@@ -161,8 +162,7 @@ void checkOGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned
     GLenum error = glGetError();
     if (error != GL_NO_ERROR)
     {
-        printf("%s:%s:%d OpenGL error: %s\n", file, func, line, gluErrorString(error));
-        exit(EXIT_FAILURE);
+        reportGenericError(file, func, line, "OpenGL error", (char*)gluErrorString(error));
     }
 }
 
@@ -271,6 +271,36 @@ GLuint createEmptyTexture(CGLContextObj cgl_ctx, size_t w, size_t h)
     return tex;
 }
 
+void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes)
+{
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
+    CHK_OGL;
+    CFMutableDataRef cfData = CFDataCreateMutable(NULL, w * h * 4);
+    CFDataSetLength(cfData, w * h * 4);
+    glGetTexImage(
+        GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
+        GL_UNSIGNED_INT_8_8_8_8_REV, CFDataGetMutableBytePtr(cfData));
+    CHK_OGL;
+    CGDataProviderRef dataProvider = CGDataProviderCreateWithCFData(cfData);
+    CGColorSpaceRef colorspace = CGColorSpaceCreateDeviceRGB();
+    CGImageRef resultImg = CGImageCreate(
+        w, h, 8, 4 * 8, 4 * w, colorspace,
+        kCGBitmapByteOrder32Host | kCGImageAlphaFirst,
+        dataProvider, NULL, false, kCGRenderingIntentDefault);
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
+        NULL, (unsigned char*)pathBytes, strlen(pathBytes), false);
+    CGImageDestinationRef imgDst = CGImageDestinationCreateWithURL(url, kUTTypePNG, 1, NULL);
+    CGImageDestinationAddImage(imgDst, resultImg, NULL);
+    CGImageDestinationFinalize(imgDst);
+    
+    CFRelease(cfData);
+    CGDataProviderRelease(dataProvider);
+    CGColorSpaceRelease(colorspace);
+    CGImageRelease(resultImg);
+    CFRelease(url);
+    CFRelease(imgDst);
+}
+
 /* credit: jfroy */
 void dumpPixFmt(CGLContextObj cgl_ctx, CGLPixelFormatObj pix) {
     CGLError err;
@@ -342,4 +372,84 @@ void dumpPixFmt(CGLContextObj cgl_ctx, CGLPixelFormatObj pix) {
     PRINTPF(kCGLPFAPBuffer);
     PRINTPF(kCGLPFARemotePBuffer);
     PRINTPF(kCGLPFAAllowOfflineRenderers);
+}
+
+/* credit: CS 101c */
+void printShaderInfoLog(CGLContextObj cgl_ctx, GLuint obj)
+{
+    GLint infologLength = 0;
+    GLint charsWritten  = 0;
+    char *infoLog;
+    
+    glGetShaderiv(obj, GL_INFO_LOG_LENGTH,&infologLength);
+    
+    if (infologLength > 0)
+    {
+        infoLog = (char *)malloc(infologLength);
+        glGetShaderInfoLog(obj, infologLength, &charsWritten, infoLog);
+        printf("%s\n",infoLog);
+        free(infoLog);
+    }
+}
+
+/* credit: CS 101c */
+void printProgramInfoLog(CGLContextObj cgl_ctx, GLuint obj)
+{
+    GLint infologLength = 0;
+    GLint charsWritten  = 0;
+    char *infoLog;
+    
+    glGetProgramiv(obj, GL_INFO_LOG_LENGTH,&infologLength);
+    
+    if (infologLength > 0)
+    {
+        infoLog = (char *)malloc(infologLength);
+        glGetProgramInfoLog(obj, infologLength, &charsWritten, infoLog);
+        printf("%s\n",infoLog);
+        free(infoLog);
+    }
+}
+
+GLuint loadProgram(CGLContextObj cgl_ctx, char* vertProgPath, char* fragProgPath)
+{
+    GLuint vertShader = loadShader(cgl_ctx, GL_VERTEX_SHADER, vertProgPath);
+    GLuint fragShader = loadShader(cgl_ctx, GL_FRAGMENT_SHADER, fragProgPath);
+    
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertShader);
+    glAttachShader(program, fragShader);
+    glLinkProgram(program);
+    printProgramInfoLog(cgl_ctx, program);
+    CHK_OGL;
+    return program;
+}
+
+GLuint loadShader(CGLContextObj cgl_ctx, GLenum shaderType, char* filePath)
+{
+    int fd;
+    struct stat sb;
+    GLint len;
+    GLchar* base;
+    GLuint shader;
+    
+    fd = open(filePath, O_RDONLY);
+    CHK_SYSCALL(fd, "open() failed", filePath);
+    CHK_SYSCALL(fstat(fd, &sb), "fstat() failed", filePath);
+    if (!S_ISREG(sb.st_mode)) ERR("not a regular file", filePath);
+    if (sb.st_size == 0) ERR("file is empty", filePath);
+    base = (GLchar*)mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    CHK_NULL(base, "mmap() failed", filePath);
+    len = sb.st_size;
+    
+    shader = glCreateShader(shaderType);
+    glShaderSource(shader, 1, (const GLchar**)&base, &len);
+    CHK_OGL;
+    glCompileShader(shader);
+    printShaderInfoLog(cgl_ctx, shader);
+    CHK_OGL;
+    
+    CHK_SYSCALL(munmap(base, len), "munmap() failed", filePath);
+    CHK_SYSCALL(close(fd), "close() failed", filePath);
+    
+    return shader;
 }

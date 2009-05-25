@@ -3,36 +3,21 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h> 
+#include <sys/stat.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/CGLMacro.h>
 
+#include "errors.h"
+#include "fpimage.h"
+
 GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* pathBytes);
-GLuint createEmptyTexture(CGLContextObj cgl_ctx, size_t w, size_t h);
+GLuint createEmptyTexture(CGLContextObj cgl_ctx, GLenum format, size_t w, size_t h);
 void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes);
+void saveFloatTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes);
 
-void reportGenericError(char *file, const char* func, unsigned long line, char* msg, char* detail);
-
-void checkCGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line, CGLError error);
-#define CHK_CGL(fn) (checkCGLError(cgl_ctx, __FILE__, __func__, __LINE__, (fn)))
-
-void checkOGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line);
-#define CHK_OGL (checkOGLError(cgl_ctx, __FILE__, __func__, __LINE__))
-
-void checkFramebufferError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line);
-#define CHK_FBO (checkFramebufferError(cgl_ctx, __FILE__, __func__, __LINE__))
-
-#define ERR(msg, detail) reportGenericError(__FILE__, __func__, __LINE__, (msg), (detail))
-#define CHK_SYSCALL(fn, msg, detail) if ((fn) == -1) ERR(msg, detail)
-#define CHK_NULL(ptr, msg, detail) if ((ptr) == NULL) ERR(msg, detail)
-
-void dumpPixFmt(CGLContextObj cgl_ctx, CGLPixelFormatObj pix);
-
-void printProgramInfoLog(CGLContextObj cgl_ctx, GLuint obj);
-void printShaderInfoLog(CGLContextObj cgl_ctx, GLuint obj);
 GLuint loadProgram(CGLContextObj cgl_ctx, char* vertProgPath, char* fragProgPath);
 GLuint loadShader(CGLContextObj cgl_ctx, GLenum shaderType, char* filePath);
 
@@ -61,7 +46,8 @@ int main(int argc, char** argv)
     GLuint fbo;
     glGenFramebuffersEXT(1, &fbo);
     glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo);
-    GLuint fboTex = createEmptyTexture(cgl_ctx, w, h);
+    //GLuint fboTex = createEmptyTexture(cgl_ctx, GL_RGBA8, w, h);
+    GLuint fboTex = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, w, h);
     glFramebufferTexture2DEXT(
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
         GL_TEXTURE_RECTANGLE_ARB, fboTex, 0);
@@ -136,80 +122,11 @@ int main(int argc, char** argv)
     CHK_OGL;
     
     /* get the results */
-    saveTexture(cgl_ctx, fboTex, w, h, "out.png");
+    //saveTexture(cgl_ctx, fboTex, w, h, "out.png");
+    saveFloatTexture(cgl_ctx, fboTex, w, h, "out.fl32");
     
     printf("ok\n");
     return EXIT_SUCCESS;
-}
-
-void reportGenericError(char *file, const char* func, unsigned long line, char* msg, char* detail)
-{
-    printf("%s:%s:%d %s: %s\n", file, func, line, msg, detail);
-    exit(EXIT_FAILURE);
-}
-
-void checkCGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line, CGLError error)
-{
-    if (error != kCGLNoError)
-    {
-        reportGenericError(file, func, line, "CGL error", (char*)CGLErrorString(error));
-    }
-}
-
-void checkOGLError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line)
-{
-    // TODO: print entire OpenGL error stack instead of just the top
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR)
-    {
-        reportGenericError(file, func, line, "OpenGL error", (char*)gluErrorString(error));
-    }
-}
-
-void checkFramebufferError(CGLContextObj cgl_ctx, char *file, const char* func, unsigned long line) {
-    GLenum status = glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT);
-    CHK_OGL;
-    switch (status) {
-        case GL_FRAMEBUFFER_COMPLETE_EXT:
-            return;
-        case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Framebuffer incomplete, incomplete attachment");
-            break;
-        case GL_FRAMEBUFFER_UNSUPPORTED_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Unsupported framebuffer format");
-            break;
-        case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Framebuffer incomplete, missing attachment");
-            break;
-        case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Framebuffer incomplete, attachments must have same dimensions");
-            break;
-        case GL_FRAMEBUFFER_INCOMPLETE_FORMATS_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Framebuffer incomplete, attached images must have same format");
-            break;
-        case GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Framebuffer incomplete, missing draw buffer");
-            break;
-        case GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER_EXT:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "Framebuffer incomplete, missing read buffer");
-            break;
-        case 0:
-            printf("%s:%s:%d framebuffer error: %s\n", file, func, line,
-                "glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT) failed");
-            CHK_OGL;
-            break;
-        default:
-            printf("%s:%s:%d framebuffer error: Unknown error code %d\n", file, func, line, status);
-            break;
-    }
-    exit(EXIT_FAILURE);
 }
 
 GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* pathBytes)
@@ -254,7 +171,7 @@ GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* 
     return tex;
 }
 
-GLuint createEmptyTexture(CGLContextObj cgl_ctx, size_t w, size_t h)
+GLuint createEmptyTexture(CGLContextObj cgl_ctx, GLenum format, size_t w, size_t h)
 {
     GLuint tex;
     glGenTextures(1, &tex);
@@ -264,7 +181,7 @@ GLuint createEmptyTexture(CGLContextObj cgl_ctx, size_t w, size_t h)
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexImage2D(
-        GL_TEXTURE_RECTANGLE_ARB, 0, GL_RGBA8, w, h,
+        GL_TEXTURE_RECTANGLE_ARB, 0, format, w, h,
         0, GL_BGRA_EXT, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
     CHK_OGL;
     
@@ -301,113 +218,39 @@ void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pa
     CFRelease(imgDst);
 }
 
-/* credit: jfroy */
-void dumpPixFmt(CGLContextObj cgl_ctx, CGLPixelFormatObj pix) {
-    CGLError err;
-    GLint val, ns;
-    int i;
-    CGLContextObj ctx = CGLGetCurrentContext();
-    
-    #define QUERYPF(vs, a) err = CGLDescribePixelFormat(pix, vs, a, &val);
-    #define PRINTPF(a) printf("%-22s", #a); \
-        for (i = 0; i < ns; i++) { \
-            QUERYPF(i, a); \
-            if (!err) { \
-                if (a == kCGLPFARendererID) printf(" %8x", val); \
-                else printf(" %8d", val); \
-            } \
-            else printf(" %s", CGLErrorString(err)); \
-        } \
-        printf("\n");
-
-    QUERYPF(0, kCGLPFAVirtualScreenCount);
-    ns = val;
-    printf("%d %-20s", ns, ns>1?"virtual screens":"virtual screen");
-    if (ctx) {
-        CGLGetVirtualScreen(ctx, &val);
-        for (i = 0; i < ns; i++) {
-            char buf[256];
-            
-            CGLSetVirtualScreen(ctx, i);
-            strncpy(buf, (char *)glGetString(GL_VENDOR), 256);
-            strtok(buf, " ");
-            printf(" %8s", buf);
-        }
-        CGLSetVirtualScreen(ctx, val);
-    }
-    printf("\n");
-    
-    PRINTPF(kCGLPFAAllRenderers);
-    PRINTPF(kCGLPFADoubleBuffer);
-    PRINTPF(kCGLPFAStereo);
-    PRINTPF(kCGLPFAAuxBuffers);
-    PRINTPF(kCGLPFAColorSize);
-    PRINTPF(kCGLPFAAlphaSize);
-    PRINTPF(kCGLPFADepthSize);
-    PRINTPF(kCGLPFAStencilSize);
-    PRINTPF(kCGLPFAAccumSize);
-    PRINTPF(kCGLPFAMinimumPolicy);
-    PRINTPF(kCGLPFAMaximumPolicy);
-    PRINTPF(kCGLPFAOffScreen);
-    PRINTPF(kCGLPFAFullScreen);
-    PRINTPF(kCGLPFASampleBuffers);
-    PRINTPF(kCGLPFASamples);
-    PRINTPF(kCGLPFAAuxDepthStencil);
-    PRINTPF(kCGLPFAColorFloat);
-    PRINTPF(kCGLPFAMultisample);
-    PRINTPF(kCGLPFASupersample);
-    PRINTPF(kCGLPFASampleAlpha);
-    PRINTPF(kCGLPFARendererID);
-    PRINTPF(kCGLPFASingleRenderer);
-    PRINTPF(kCGLPFANoRecovery);
-    PRINTPF(kCGLPFAAccelerated);
-    PRINTPF(kCGLPFAClosestPolicy);
-    PRINTPF(kCGLPFARobust);
-    PRINTPF(kCGLPFABackingStore);
-    PRINTPF(kCGLPFAMPSafe);
-    PRINTPF(kCGLPFAWindow);
-    PRINTPF(kCGLPFAMultiScreen);
-    PRINTPF(kCGLPFACompliant);
-    PRINTPF(kCGLPFADisplayMask);
-    PRINTPF(kCGLPFAPBuffer);
-    PRINTPF(kCGLPFARemotePBuffer);
-    PRINTPF(kCGLPFAAllowOfflineRenderers);
-}
-
-/* credit: CS 101c */
-void printShaderInfoLog(CGLContextObj cgl_ctx, GLuint obj)
+void saveFloatTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes)
 {
-    GLint infologLength = 0;
-    GLint charsWritten  = 0;
-    char *infoLog;
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
+    CHK_OGL;
+    size_t cookedImgByteCount = sizeof(struct floatImageHeader) + w * h * 4 * sizeof(GLfloat);
+    CFMutableDataRef cfData = CFDataCreateMutable(NULL, cookedImgByteCount);
+    CFDataSetLength(cfData, cookedImgByteCount);
+    void* imgBase = CFDataGetMutableBytePtr(cfData);
     
-    glGetShaderiv(obj, GL_INFO_LOG_LENGTH,&infologLength);
+    struct floatImageHeader* imgHeaderBase = (struct floatImageHeader*)imgBase;
+    imgHeaderBase->sig[0] = '2';
+    imgHeaderBase->sig[1] = '3';
+    imgHeaderBase->sig[2] = 'l';
+    imgHeaderBase->sig[3] = 'f';
+    imgHeaderBase->numChannels = 4;
+    imgHeaderBase->w = w;
+    imgHeaderBase->h = h;
     
-    if (infologLength > 0)
-    {
-        infoLog = (char *)malloc(infologLength);
-        glGetShaderInfoLog(obj, infologLength, &charsWritten, infoLog);
-        printf("%s\n",infoLog);
-        free(infoLog);
-    }
-}
-
-/* credit: CS 101c */
-void printProgramInfoLog(CGLContextObj cgl_ctx, GLuint obj)
-{
-    GLint infologLength = 0;
-    GLint charsWritten  = 0;
-    char *infoLog;
+    void* imgDataBase = imgBase + sizeof(struct floatImageHeader);
+    glGetTexImage(
+        GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
+        GL_FLOAT, imgDataBase);
+    CHK_OGL;
     
-    glGetProgramiv(obj, GL_INFO_LOG_LENGTH,&infologLength);
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
+        NULL, (unsigned char*)pathBytes, strlen(pathBytes), false);
+    Boolean success;
+    SInt32 errorCode;
+    success = CFURLWriteDataAndPropertiesToResource(url, cfData, NULL, &errorCode);
+    CHK_CFURL(success, errorCode);
     
-    if (infologLength > 0)
-    {
-        infoLog = (char *)malloc(infologLength);
-        glGetProgramInfoLog(obj, infologLength, &charsWritten, infoLog);
-        printf("%s\n",infoLog);
-        free(infoLog);
-    }
+    CFRelease(cfData);
+    CFRelease(url);
 }
 
 GLuint loadProgram(CGLContextObj cgl_ctx, char* vertProgPath, char* fragProgPath)

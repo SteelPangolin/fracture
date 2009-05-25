@@ -10,5 +10,8 @@ find_library(APPSVCS_LIB ApplicationServices)
 find_path(OPENGL_INC_DIR OpenGL/OpenGL.h)
 find_library(OPENGL_LIB OpenGL)
 
-add_executable(fracture fracture.c)
+add_executable(fracture fracture.c errors.c)
 target_link_libraries(fracture ${CF_LIB} ${APPSVCS_LIB} ${OPENGL_LIB})
+
+add_executable(fpstats fpstats.c errors.c)
+target_link_libraries(fpstats ${CF_LIB} ${APPSVCS_LIB} ${OPENGL_LIB})

@@ -46,12 +46,19 @@ int main(int argc, char** argv)
     GLuint fbo;
     glGenFramebuffersEXT(1, &fbo);
     glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo);
-    //GLuint fboTex = createEmptyTexture(cgl_ctx, GL_RGBA8, w, h);
-    GLuint fboTex = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, w, h);
-    glFramebufferTexture2DEXT(
-        GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
-        GL_TEXTURE_RECTANGLE_ARB, fboTex, 0);
-    CHK_OGL;
+        
+    GLuint fboTex[2];
+    size_t i;
+    for (i = 0; i < 2; i++)
+    {
+        //fboTex[i] = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, w, h);
+        fboTex[i] = createEmptyTexture(cgl_ctx, GL_RGBA8, w, h);
+        glFramebufferTexture2DEXT(
+            GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT + i,
+            GL_TEXTURE_RECTANGLE_ARB, fboTex[i], 0);
+        CHK_OGL;
+    }
+    
     GLuint renderbuffer;
     glGenRenderbuffersEXT(1, &renderbuffer);
     glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, renderbuffer);
@@ -63,20 +70,14 @@ int main(int argc, char** argv)
     CHK_FBO;
     
     /* set up shader */
-    GLuint program = loadProgram(cgl_ctx, "../src/test.vert", "../src/test.frag");
-    glUseProgram(program);
-    GLuint imgTexLoc = glGetUniformLocation(program, "imgTex");
-    glUniform1i(imgTexLoc, 0); /* GL_TEXTURE0 */
-    CHK_OGL;
-    
-    /* set up render area */
-    glViewport(0, 0, w, h);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    // TODO: why doesn't gluOrtho2D(0, w, 0, h) work?
-    glOrtho(0, w, 0, h, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    GLuint paintShader = loadProgram(cgl_ctx, "../src/test.vert", "../src/test.frag");
+    glUseProgram(paintShader);
+    GLuint paintShader_imgTex = glGetUniformLocation(paintShader, "imgTex");
+    glUniform1i(paintShader_imgTex, 0); /* GL_TEXTURE0 */
+    GLuint paintShader_w = glGetUniformLocation(paintShader, "w");
+    glUniform1f(paintShader_w, w);
+    GLuint paintShader_h = glGetUniformLocation(paintShader, "h");
+    glUniform1f(paintShader_h, h);
     CHK_OGL;
     
     /* create full screen quad */
@@ -85,14 +86,14 @@ int main(int argc, char** argv)
         0.0, 0.0,
         0.0, 0.0, 0.0,
         
-        0.0, (GLfloat)h,
-        0.0, (GLfloat)h, 0.0,
+        0.0, 1.0,
+        0.0, 1.0, 0.0,
         
-        (GLfloat)w, (GLfloat)h,
-        (GLfloat)w, (GLfloat)h, 0.0,
+        1.0, 1.0,
+        1.0, 1.0, 0.0,
         
-        (GLfloat)w, 0.0,
-        (GLfloat)w, 0.0, 0.0
+        1.0, 0.0,
+        1.0, 0.0, 0.0
     };
     GLuint vbo;
 	glGenBuffers(1, &vbo);
@@ -107,13 +108,44 @@ int main(int argc, char** argv)
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, 4 * sizeof(GLuint), indexData, GL_STATIC_DRAW);
     CHK_OGL;
     
+    glInterleavedArrays(GL_T2F_V3F, 0, 0);
+    CHK_OGL;
+    
     /* draw it */
+    glViewport(0, 0, w, h);
     glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
     CHK_OGL;
     CHK_FBO;
+    glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_TEXTURE_RECTANGLE_ARB);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, imgTex);
+    CHK_OGL;
+    glDrawArrays(GL_QUADS, 0, 4);
+    CHK_OGL;
+    glFlush();
+    CHK_OGL;
+    
+    /* set up reduction shader */
+    GLuint sumReductionShader = loadProgram(cgl_ctx, "../src/sumReduction.vert", "../src/sumReduction.frag");
+    glUseProgram(sumReductionShader);
+    GLuint sumReductionShader_tex = glGetUniformLocation(sumReductionShader, "tex");
+    glUniform1i(sumReductionShader_tex, 0); /* GL_TEXTURE0 */
+    GLuint sumReductionShader_w = glGetUniformLocation(sumReductionShader, "w");
+    glUniform1f(sumReductionShader_w, w / 2);
+    GLuint sumReductionShader_h = glGetUniformLocation(sumReductionShader, "h");
+    glUniform1f(sumReductionShader_h, h / 2);
+    CHK_OGL;
+    
+    /* draw it again */
+    glViewport(0, 0, w / 2, h / 2);
+    glDrawBuffer(GL_COLOR_ATTACHMENT1_EXT);
+    CHK_OGL;
+    CHK_FBO;
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_TEXTURE_RECTANGLE_ARB);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, fboTex[0]);
     CHK_OGL;
     glInterleavedArrays(GL_T2F_V3F, 0, 0);
     glDrawArrays(GL_QUADS, 0, 4);
@@ -122,8 +154,8 @@ int main(int argc, char** argv)
     CHK_OGL;
     
     /* get the results */
-    //saveTexture(cgl_ctx, fboTex, w, h, "out.png");
-    saveFloatTexture(cgl_ctx, fboTex, w, h, "out.fl32");
+    saveTexture(cgl_ctx, fboTex[1], w, h, "out.png");
+    //saveFloatTexture(cgl_ctx, fboTex[1], w, h, "out.fl32");
     
     printf("ok\n");
     return EXIT_SUCCESS;

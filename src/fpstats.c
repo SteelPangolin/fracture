@@ -6,9 +6,6 @@
 #include <sys/stat.h>
 
 #include <CoreFoundation/CoreFoundation.h>
-#include <ApplicationServices/ApplicationServices.h>
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/CGLMacro.h>
 
 #include "errors.h"
 #include "fpimage.h"

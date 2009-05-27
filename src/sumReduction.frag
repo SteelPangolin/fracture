@@ -5,7 +5,7 @@ const vec2 tIncr = vec2(0.0, 1.0);
 
 void main()
 {
-    vec2 sampleBase = gl_TexCoord[0].st * 2.0;
+    vec2 sampleBase = gl_TexCoord[0].st;
     vec4 acc = texture2DRect(tex, sampleBase);
     acc += texture2DRect(tex, sampleBase + sIncr);
     acc += texture2DRect(tex, sampleBase + tIncr);

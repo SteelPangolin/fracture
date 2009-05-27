@@ -23,6 +23,11 @@ GLuint sumReductionShader_tex;
 GLuint sumReductionShader_w;
 GLuint sumReductionShader_h;
 
+GLuint squareShader;
+GLuint squareShader_tex;
+GLuint squareShader_w;
+GLuint squareShader_h;
+
 /*
  * function declarations
  */
@@ -42,6 +47,10 @@ GLuint sumReduce(CGLContextObj cgl_ctx,
     size_t times,
     GLuint srcTex, size_t srcW, size_t srcH,
     size_t* dstW, size_t* dstH);
+
+GLuint square(CGLContextObj cgl_ctx,
+    GLuint srcTex, size_t srcW, size_t srcH,
+    size_t dstW, size_t dstH);
 
 /*
  * function implementations
@@ -121,6 +130,13 @@ void loadGLResources(CGLContextObj cgl_ctx)
     sumReductionShader_w = glGetUniformLocation(sumReductionShader, "w");
     sumReductionShader_h = glGetUniformLocation(sumReductionShader, "h");
     CHK_OGL;
+    
+    /* square shader */
+    squareShader = loadProgram(cgl_ctx, "../src/square.vert", "../src/square.frag");
+    squareShader_tex = glGetUniformLocation(squareShader, "tex");
+    squareShader_w = glGetUniformLocation(squareShader, "w");
+    squareShader_h = glGetUniformLocation(squareShader, "h");
+    CHK_OGL;
 }
 
 int main(int argc, char** argv)
@@ -152,6 +168,11 @@ int main(int argc, char** argv)
         srcImgTex, fbW, fbH,
         fbW, fbH);
     saveTexture(cgl_ctx, R_tex, fbW, fbH, "R_tex.png");
+    
+    GLuint R2_tex = square(cgl_ctx,
+        srcImgTex, fbW, fbH,
+        fbW, fbH);
+    saveTexture(cgl_ctx, R2_tex, fbW, fbH, "R2_tex.png");
     
     size_t dstW, dstH;
     GLuint sumR_tex = sumReduce(cgl_ctx,
@@ -189,6 +210,44 @@ GLuint paint(CGLContextObj cgl_ctx,
     
     glUniform1f(paintShader_w, srcW);
     glUniform1f(paintShader_h, srcH);
+    CHK_OGL;
+    
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcTex);
+    CHK_OGL;
+    
+    glViewport(0, 0, dstW, dstH);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawArrays(GL_QUADS, 0, 4);
+    glFlush();
+    CHK_OGL;
+    
+    glFramebufferTexture2DEXT(
+        GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
+        GL_TEXTURE_RECTANGLE_ARB, 0, 0);
+    
+    return dstTex;
+}
+
+GLuint square(CGLContextObj cgl_ctx,
+    GLuint srcTex, size_t srcW, size_t srcH,
+    size_t dstW, size_t dstH)
+{
+    glUseProgram(squareShader);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(squareShader_tex, 0 /* GL_TEXTURE0 */);
+    CHK_OGL;
+    
+    GLuint dstTex = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    
+    glFramebufferTexture2DEXT(
+        GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
+        GL_TEXTURE_RECTANGLE_ARB, dstTex, 0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT2_EXT);
+    CHK_OGL;
+    CHK_FBO;
+    
+    glUniform1f(squareShader_w, srcW);
+    glUniform1f(squareShader_h, srcH);
     CHK_OGL;
     
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcTex);

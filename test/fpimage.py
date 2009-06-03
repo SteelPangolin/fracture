@@ -141,13 +141,19 @@ def calcO(n, sum_D, sum_r, S):
     return (sum_r - S * sum_D) / n
 
 def calcMSE(n, sum_D, sum_D2, sum_r, sum_r2, sum_rD, S, O):
+    SE = S * (S * sum_D2 + 2 * (O * sum_D - sum_rD)) \
+        + O * (n * O - 2 * sum_r) \
+        + sum_r2
+    return SE / n
+
+def calcMSEAlt(n, sum_D, sum_D2, sum_r, sum_r2, sum_rD, S, O):
     # rearrange for speed
     # see: Fisher, p. 21
     SE = sum_r2 \
-        - 2 * S * sum_rD \
         + S * S * sum_D2 \
-        - 2 * O * sum_r \
         + 2 * O * S * sum_D \
+        - 2 * S * sum_rD \
+        - 2 * O * sum_r \
         + n * O * O
     return SE / n
 

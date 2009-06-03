@@ -157,7 +157,7 @@ void saveFloatTexture(CGLContextObj cgl_ctx, texInfo* t, char* pathBytes)
     void* texDataBase = malloc(sizeof(GLfloat) * 4 * t->w * t->h);
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, t->tex);
     glGetTexImage(
-        GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
+        GL_TEXTURE_RECTANGLE_ARB, 0, GL_RGBA,
         GL_FLOAT, texDataBase);
     CHK_OGL;
     
@@ -209,6 +209,12 @@ void saveFloatTexture(CGLContextObj cgl_ctx, texInfo* t, char* pathBytes)
     free(texDataBase);
     CFRelease(cfData);
     CFRelease(url);
+}
+
+void releaseTexture(CGLContextObj cgl_ctx, texInfo* t)
+{
+    glDeleteTextures(1, &(t->tex));
+    free(t);
 }
 
 GLuint loadProgram(CGLContextObj cgl_ctx, char* vertProgPath, char* fragProgPath)

@@ -18,6 +18,7 @@ texInfo* createTextureFromPath(CGLContextObj cgl_ctx, char* pathBytes);
 texInfo* createEmptyTexture(CGLContextObj cgl_ctx, GLenum format, size_t w, size_t h);
 void saveTexture(CGLContextObj cgl_ctx, texInfo* t, char* pathBytes);
 void saveFloatTexture(CGLContextObj cgl_ctx, texInfo* t, char* pathBytes);
+void releaseTexture(CGLContextObj cgl_ctx, texInfo* t);
 
 GLuint loadProgram(CGLContextObj cgl_ctx, char* vertProgPath, char* fragProgPath);
 GLuint loadShader(CGLContextObj cgl_ctx, GLenum shaderType, char* filePath);

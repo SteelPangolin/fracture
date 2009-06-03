@@ -34,27 +34,43 @@ GLuint squareShader_h;
 
 void loadGLResources(CGLContextObj cgl_ctx);
 
-GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* pathBytes);
-GLuint createEmptyTexture(CGLContextObj cgl_ctx, GLenum format, size_t w, size_t h);
-void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes);
-void saveFloatTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes);
-
-GLuint paint(CGLContextObj cgl_ctx,
-    GLuint srcTex, size_t srcW, size_t srcH,
+texInfo* paint(CGLContextObj cgl_ctx,
+    texInfo* srcT,
     size_t dstW, size_t dstH);
 
-GLuint sumReduce(CGLContextObj cgl_ctx,
-    size_t times,
-    GLuint srcTex, size_t srcW, size_t srcH,
-    size_t* dstW, size_t* dstH);
+texInfo* sumReduce(CGLContextObj cgl_ctx,
+    texInfo* srcT,
+    size_t times);
 
-GLuint square(CGLContextObj cgl_ctx,
-    GLuint srcTex, size_t srcW, size_t srcH,
-    size_t dstW, size_t dstH);
+texInfo* square(CGLContextObj cgl_ctx,
+    texInfo* srcT);
+
+int log2int(int x);
 
 /*
  * function implementations
  */
+
+int log2int(int x)
+{
+    if (x <= 0)
+    {
+        ERR("argument <= 0", "");
+    }
+    
+    int i = 0;
+    while ((x >> i) != 1)
+    {
+        i++;
+    }
+    
+    if (x != (1 << i))
+    {
+        i++;
+    }
+    
+    return i;
+}
 
 void loadGLResources(CGLContextObj cgl_ctx)
 {
@@ -80,7 +96,9 @@ void loadGLResources(CGLContextObj cgl_ctx)
     size_t i;
     for (i = 0; i < 2; i++)
     {
-        fboTex[i] = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+        texInfo* t = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+        fboTex[i] = t->tex;
+        free(t);
         glFramebufferTexture2DEXT(
             GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT + i,
             GL_TEXTURE_RECTANGLE_ARB, fboTex[i], 0);
@@ -118,21 +136,21 @@ void loadGLResources(CGLContextObj cgl_ctx)
     CHK_OGL;
     
     /* paint shader */
-    paintShader = loadProgram(cgl_ctx, "../src/paint.vert", "../src/paint.frag");
+    paintShader = loadProgram(cgl_ctx, "../src/common.vert", "../src/paint.frag");
     paintShader_tex = glGetUniformLocation(paintShader, "tex");
     paintShader_w = glGetUniformLocation(paintShader, "w");
     paintShader_h = glGetUniformLocation(paintShader, "h");
     CHK_OGL;
     
     /* sum reduction shader */
-    sumReductionShader = loadProgram(cgl_ctx, "../src/sumReduction.vert", "../src/sumReduction.frag");
+    sumReductionShader = loadProgram(cgl_ctx, "../src/common.vert", "../src/sumReduction.frag");
     sumReductionShader_tex = glGetUniformLocation(sumReductionShader, "tex");
     sumReductionShader_w = glGetUniformLocation(sumReductionShader, "w");
     sumReductionShader_h = glGetUniformLocation(sumReductionShader, "h");
     CHK_OGL;
     
     /* square shader */
-    squareShader = loadProgram(cgl_ctx, "../src/square.vert", "../src/square.frag");
+    squareShader = loadProgram(cgl_ctx, "../src/common.vert", "../src/square.frag");
     squareShader_tex = glGetUniformLocation(squareShader, "tex");
     squareShader_w = glGetUniformLocation(squareShader, "w");
     squareShader_h = glGetUniformLocation(squareShader, "h");
@@ -140,13 +158,13 @@ void loadGLResources(CGLContextObj cgl_ctx)
 }
 
 int main(int argc, char** argv)
-{
+{   
     /* get a CGL context */
     CGLContextObj cgl_ctx;
     CGLPixelFormatAttribute attribs[] = {
         kCGLPFAAccelerated,
         kCGLPFAPBuffer, // bypasses default of window drawable. use kCGLPFARemotePBuffer if this fails on remote session
-        //kCGLPFANoRecovery, // disables software fallback
+        kCGLPFANoRecovery, // disables software fallback
         0
     };
     CGLPixelFormatObj pxlFmt;
@@ -156,42 +174,66 @@ int main(int argc, char** argv)
     CHK_CGL(CGLCreateContext(pxlFmt, NULL, &cgl_ctx));
     CHK_CGL(CGLSetCurrentContext(cgl_ctx));
     
-    size_t domainSize = 8;
-    size_t rangeSize  = 4;
+    size_t d_size = 8;
+    size_t r_size = 4;
+    int m = log2int(d_size) - log2int(r_size);
     
     /* load image to process */
-    GLuint srcImgTex = createTextureFromPath(cgl_ctx, &fbW, &fbH, "../data/lena.png");
+    texInfo* srcImgT = createTextureFromPath(cgl_ctx, "../data/lena.png");
+    srcImgT->aC = 1;
+    fbW = srcImgT->w;
+    fbH = srcImgT->h;
     
     loadGLResources(cgl_ctx);
     
-    GLuint R_tex = paint(cgl_ctx,
-        srcImgTex, fbW, fbH,
-        fbW, fbH);
-    saveTexture(cgl_ctx, R_tex, fbW, fbH, "R_tex.png");
+    /* range data */
     
-    GLuint R2_tex = square(cgl_ctx,
-        srcImgTex, fbW, fbH,
-        fbW, fbH);
-    saveTexture(cgl_ctx, R2_tex, fbW, fbH, "R2_tex.png");
+    texInfo* R_T = paint(cgl_ctx,
+        srcImgT,
+        srcImgT->w, srcImgT->h);
+    saveTexture(cgl_ctx, R_T, "OpenGL-R.png");
     
-    size_t dstW, dstH;
-    GLuint sumR_tex = sumReduce(cgl_ctx,
-        2,
-        R_tex, fbW, fbH,
-        &dstW, &dstH);
-    saveTexture(cgl_ctx, sumR_tex, fbW, fbH, "sumR_tex.png");
+    texInfo* sumR_T = sumReduce(cgl_ctx,
+        R_T,
+        log2int(r_size));
+    saveFloatTexture(cgl_ctx, sumR_T, "OpenGL-sumR.fl32");
     
-    GLuint D_tex = paint(cgl_ctx,
-        R_tex, fbW, fbH,
-        fbW / 2, fbH / 2);
-    saveTexture(cgl_ctx, D_tex, fbW, fbH, "D_tex.png");
+    texInfo* R2_T = square(cgl_ctx,
+        R_T);
+    saveTexture(cgl_ctx, R2_T, "OpenGL-R2.png");
+    
+    texInfo* sumR2_T = sumReduce(cgl_ctx,
+        R2_T,
+        log2int(r_size));
+    saveFloatTexture(cgl_ctx, sumR2_T, "OpenGL-sumR2.fl32");
+    
+    /* domain data */
+    
+    texInfo* D_T = paint(cgl_ctx,
+        srcImgT,
+        srcImgT->w >> m, srcImgT->h >> m);
+    saveTexture(cgl_ctx, D_T, "OpenGL-D.png");
+    
+    texInfo* sumD_T = sumReduce(cgl_ctx,
+        D_T,
+        log2int(d_size));
+    saveFloatTexture(cgl_ctx, sumD_T, "OpenGL-sumD.fl32");
+    
+    texInfo* D2_T = square(cgl_ctx,
+        D_T);
+    saveTexture(cgl_ctx, D2_T, "OpenGL-D2.png");
+    
+    texInfo* sumD2_T = sumReduce(cgl_ctx,
+        D2_T,
+        log2int(d_size));
+    saveFloatTexture(cgl_ctx, sumD2_T, "OpenGL-sumD2.fl32");
     
     printf("ok\n");
     return EXIT_SUCCESS;
 }
 
-GLuint paint(CGLContextObj cgl_ctx,
-    GLuint srcTex, size_t srcW, size_t srcH,
+texInfo* paint(CGLContextObj cgl_ctx,
+    texInfo* srcT,
     size_t dstW, size_t dstH)
 {
     glUseProgram(paintShader);
@@ -199,20 +241,23 @@ GLuint paint(CGLContextObj cgl_ctx,
     glUniform1i(paintShader_tex, 0 /* GL_TEXTURE0 */);
     CHK_OGL;
     
-    GLuint dstTex = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    texInfo* dstT = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    dstT->aW = dstW;
+    dstT->aH = dstH;
+    dstT->aC = srcT->aC;
     
     glFramebufferTexture2DEXT(
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
-        GL_TEXTURE_RECTANGLE_ARB, dstTex, 0);
+        GL_TEXTURE_RECTANGLE_ARB, dstT->tex, 0);
     glDrawBuffer(GL_COLOR_ATTACHMENT2_EXT);
     CHK_OGL;
     CHK_FBO;
     
-    glUniform1f(paintShader_w, srcW);
-    glUniform1f(paintShader_h, srcH);
+    glUniform1f(paintShader_w, srcT->w);
+    glUniform1f(paintShader_h, srcT->h);
     CHK_OGL;
     
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcTex);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcT->tex);
     CHK_OGL;
     
     glViewport(0, 0, dstW, dstH);
@@ -225,35 +270,37 @@ GLuint paint(CGLContextObj cgl_ctx,
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
         GL_TEXTURE_RECTANGLE_ARB, 0, 0);
     
-    return dstTex;
+    return dstT;
 }
 
-GLuint square(CGLContextObj cgl_ctx,
-    GLuint srcTex, size_t srcW, size_t srcH,
-    size_t dstW, size_t dstH)
+texInfo* square(CGLContextObj cgl_ctx,
+    texInfo* srcT)
 {
     glUseProgram(squareShader);
     glActiveTexture(GL_TEXTURE0);
     glUniform1i(squareShader_tex, 0 /* GL_TEXTURE0 */);
     CHK_OGL;
     
-    GLuint dstTex = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    texInfo* dstT = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    dstT->aW = srcT->aW;
+    dstT->aH = srcT->aH;
+    dstT->aC = srcT->aC;
     
     glFramebufferTexture2DEXT(
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
-        GL_TEXTURE_RECTANGLE_ARB, dstTex, 0);
+        GL_TEXTURE_RECTANGLE_ARB, dstT->tex, 0);
     glDrawBuffer(GL_COLOR_ATTACHMENT2_EXT);
     CHK_OGL;
     CHK_FBO;
     
-    glUniform1f(squareShader_w, srcW);
-    glUniform1f(squareShader_h, srcH);
+    glUniform1f(squareShader_w, srcT->w);
+    glUniform1f(squareShader_h, srcT->h);
     CHK_OGL;
     
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcTex);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcT->tex);
     CHK_OGL;
     
-    glViewport(0, 0, dstW, dstH);
+    glViewport(0, 0, dstT->w, dstT->h);
     glClear(GL_COLOR_BUFFER_BIT);
     glDrawArrays(GL_QUADS, 0, 4);
     glFlush();
@@ -263,26 +310,29 @@ GLuint square(CGLContextObj cgl_ctx,
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
         GL_TEXTURE_RECTANGLE_ARB, 0, 0);
     
-    return dstTex;
+    return dstT;
 }
 
-GLuint sumReduce(CGLContextObj cgl_ctx,
-    size_t times,
-    GLuint srcTex, size_t srcW, size_t srcH,
-    size_t* dstW, size_t* dstH)
+texInfo* sumReduce(CGLContextObj cgl_ctx,
+    texInfo* srcT,
+    size_t times)
 {
     if (times == 0)
     {
         ERR("degenerate reduction", "did you do something wrong?");
     }
     
-    size_t w = srcW;
-    size_t h = srcH;
+    size_t w = srcT->w;
+    size_t h = srcT->h;
     
-    GLuint dstTex = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    texInfo* dstT = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);
+    dstT->aW = w >> times;
+    dstT->aH = h >> times;
+    dstT->aC = srcT->aC;
+    
     glFramebufferTexture2DEXT(
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
-        GL_TEXTURE_RECTANGLE_ARB, dstTex, 0);
+        GL_TEXTURE_RECTANGLE_ARB, dstT->tex, 0);
     
     glUseProgram(sumReductionShader);
     glActiveTexture(GL_TEXTURE0);
@@ -291,7 +341,7 @@ GLuint sumReduce(CGLContextObj cgl_ctx,
     
     if (times == 1)
     {
-        glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcTex);
+        glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcT->tex);
         glDrawBuffer(GL_COLOR_ATTACHMENT2_EXT);
         CHK_OGL;
         CHK_FBO;
@@ -308,7 +358,7 @@ GLuint sumReduce(CGLContextObj cgl_ctx,
     }
     else
     {
-        glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcTex);
+        glBindTexture(GL_TEXTURE_RECTANGLE_ARB, srcT->tex);
         glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
         CHK_OGL;
         CHK_FBO;
@@ -374,7 +424,5 @@ GLuint sumReduce(CGLContextObj cgl_ctx,
         GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT2_EXT,
         GL_TEXTURE_RECTANGLE_ARB, 0, 0);
     
-    *dstW = w / 2;
-    *dstH = h / 2;
-    return dstTex;
+    return dstT;
 }

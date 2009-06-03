@@ -15,35 +15,34 @@
 
 #include "glio.h"
 
-GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* pathBytes)
+texInfo* createTextureFromPath(CGLContextObj cgl_ctx, char* pathBytes)
 {
+    texInfo* t = calloc(1, sizeof(texInfo));
+    
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(
         NULL, (unsigned char*)pathBytes, strlen(pathBytes), false);
     CGImageSourceRef imgSrc = CGImageSourceCreateWithURL(url, NULL);
     CGImageRef img = CGImageSourceCreateImageAtIndex(imgSrc, 0, NULL);
-    size_t width  = CGImageGetWidth(img);
-    if (w != NULL) *w = width;
-    size_t height = CGImageGetHeight(img);
-    if (h != NULL) *h = height;
-    CGRect rect = {{0, 0}, {width, height}};
-    void* data = calloc(width * 4, height);
+    t->w  = CGImageGetWidth(img);
+    t->h = CGImageGetHeight(img);
+    CGRect rect = {{0, 0}, {t->w, t->h}};
+    void* data = calloc(t->w * 4, t->h);
     CGColorSpaceRef colorspace = CGColorSpaceCreateDeviceRGB();
     CGContextRef cgCtx = CGBitmapContextCreate(
-        data, width, height, 8, width * 4, colorspace,
+        data, t->w, t->h, 8, t->w * 4, colorspace,
         kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst);
     CGContextDrawImage(cgCtx, rect, img);
     
-    GLuint tex;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
+    glGenTextures(1, &(t->tex));
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, t->tex);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, t->w);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(
-        GL_TEXTURE_RECTANGLE_ARB, 0, GL_RGBA8, width, height,
+        GL_TEXTURE_RECTANGLE_ARB, 0, GL_RGBA8, t->w, t->h,
         0, GL_BGRA_EXT, GL_UNSIGNED_INT_8_8_8_8_REV, data);
     CHK_OGL;
     
@@ -54,41 +53,87 @@ GLuint createTextureFromPath(CGLContextObj cgl_ctx, size_t* w, size_t *h, char* 
     CGContextRelease(cgCtx);
     free(data);
     
-    return tex;
+    t->aW = t->w;
+    t->aH = t->h;
+    t->aC = 4;
+    
+    return t;
 }
 
-GLuint createEmptyTexture(CGLContextObj cgl_ctx, GLenum format, size_t w, size_t h)
+texInfo* createEmptyTexture(CGLContextObj cgl_ctx, GLenum format, size_t w, size_t h)
 {
-    GLuint tex;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
+    texInfo* t = calloc(1, sizeof(texInfo));
+    
+    t->w = w;
+    t->h = h;
+    
+    glGenTextures(1, &(t->tex));
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, t->tex);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexImage2D(
-        GL_TEXTURE_RECTANGLE_ARB, 0, format, w, h,
+        GL_TEXTURE_RECTANGLE_ARB, 0, format, t->w, t->h,
         0, GL_BGRA_EXT, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
     CHK_OGL;
     
-    return tex;
+    return t;
 }
 
-void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes)
+void saveTexture(CGLContextObj cgl_ctx, texInfo* t, char* pathBytes)
 {
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
-    CHK_OGL;
-    CFMutableDataRef cfData = CFDataCreateMutable(NULL, w * h * 4);
-    CFDataSetLength(cfData, w * h * 4);
+    void* texDataBase = malloc(4 * t->w * t->h);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, t->tex);
     glGetTexImage(
         GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
-        GL_UNSIGNED_INT_8_8_8_8_REV, CFDataGetMutableBytePtr(cfData));
+        GL_UNSIGNED_INT_8_8_8_8_REV, texDataBase);
     CHK_OGL;
+    
+    CFMutableDataRef cfData = CFDataCreateMutable(NULL, t->w * t->h * 4);
+    CFDataSetLength(cfData, t->w * t->h * 4);
+    
+    size_t texPixelLen = 4;
+    size_t imgPixelLen = t->aC;
+    
+    size_t texRowSkip = texPixelLen * (t->w - t->aW);
+    
+    void* imgDataBase = CFDataGetMutableBytePtr(cfData);
+    void* imgDataPtr = imgDataBase;
+    void* texDataPtr = texDataBase;
+    size_t i, j;
+    for (j = 0; j < t->aH; j++)
+    {
+        for (i = 0; i < t->aW; i++)
+        {
+            memcpy(imgDataPtr, texDataPtr, imgPixelLen);
+            imgDataPtr += imgPixelLen;
+            texDataPtr += texPixelLen;
+        }
+        texDataPtr += texRowSkip;
+    }
+    
+    CGColorSpaceRef colorspace;
+    CGBitmapInfo bitmapInfo;
+    char* errorString;
+    switch (t->aC)
+    {
+    case 1:
+        colorspace = CGColorSpaceCreateDeviceGray();
+        bitmapInfo = kCGBitmapByteOrderDefault;
+        break;
+    case 4:
+        colorspace = CGColorSpaceCreateDeviceRGB();
+        bitmapInfo = kCGBitmapByteOrder32Host | kCGImageAlphaFirst;
+        break;
+    default:
+        asprintf(&errorString, "%d", t->aC);
+        ERR("unsupported number of channels", errorString);
+    }
+    
     CGDataProviderRef dataProvider = CGDataProviderCreateWithCFData(cfData);
-    CGColorSpaceRef colorspace = CGColorSpaceCreateDeviceRGB();
     CGImageRef resultImg = CGImageCreate(
-        w, h, 8, 4 * 8, 4 * w, colorspace,
-        kCGBitmapByteOrder32Host | kCGImageAlphaFirst,
+        t->aW, t->aH, 8, t->aC * 8, t->aC * t->aW, colorspace, bitmapInfo,
         dataProvider, NULL, false, kCGRenderingIntentDefault);
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(
         NULL, (unsigned char*)pathBytes, strlen(pathBytes), false);
@@ -96,8 +141,9 @@ void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pa
     CGImageDestinationAddImage(imgDst, resultImg, NULL);
     CGImageDestinationFinalize(imgDst);
     
-    printf("wrote texture as PNG: %s (%d x %d)\n", pathBytes, w, h);
+    printf("wrote texture as PNG: %s (%d x %d, %d channels)\n", pathBytes, t->aW, t->aH, t->aC);
     
+    free(texDataBase);
     CFRelease(cfData);
     CGDataProviderRelease(dataProvider);
     CGColorSpaceRelease(colorspace);
@@ -106,29 +152,50 @@ void saveTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pa
     CFRelease(imgDst);
 }
 
-void saveFloatTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, char* pathBytes)
+void saveFloatTexture(CGLContextObj cgl_ctx, texInfo* t, char* pathBytes)
 {
-    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, tex);
+    void* texDataBase = malloc(sizeof(GLfloat) * 4 * t->w * t->h);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, t->tex);
+    glGetTexImage(
+        GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
+        GL_FLOAT, texDataBase);
     CHK_OGL;
-    size_t cookedImgByteCount = sizeof(struct floatImageHeader) + w * h * 4 * sizeof(GLfloat);
+    
+    size_t cookedImgByteCount =
+          sizeof(struct floatImageHeader)
+        + t->aW * t->aH * t->aC * sizeof(GLfloat);
     CFMutableDataRef cfData = CFDataCreateMutable(NULL, cookedImgByteCount);
     CFDataSetLength(cfData, cookedImgByteCount);
     void* imgBase = CFDataGetMutableBytePtr(cfData);
     
     struct floatImageHeader* imgHeaderBase = (struct floatImageHeader*)imgBase;
-    imgHeaderBase->sig[0] = '2';
+    imgHeaderBase->sig[0] = '2'; /* little-endian signature */
     imgHeaderBase->sig[1] = '3';
     imgHeaderBase->sig[2] = 'l';
     imgHeaderBase->sig[3] = 'f';
-    imgHeaderBase->numChannels = 4;
-    imgHeaderBase->w = w;
-    imgHeaderBase->h = h;
+    imgHeaderBase->numChannels = t->aC;
+    imgHeaderBase->w = t->aW;
+    imgHeaderBase->h = t->aH;
+    
+    size_t texPixelLen = sizeof(GLfloat) * 4;
+    size_t imgPixelLen = sizeof(GLfloat) * t->aC;
+    
+    size_t texRowSkip = texPixelLen * (t->w - t->aW);
     
     void* imgDataBase = imgBase + sizeof(struct floatImageHeader);
-    glGetTexImage(
-        GL_TEXTURE_RECTANGLE_ARB, 0, GL_BGRA,
-        GL_FLOAT, imgDataBase);
-    CHK_OGL;
+    void* imgDataPtr = imgDataBase;
+    void* texDataPtr = texDataBase;
+    size_t i, j;
+    for (j = 0; j < t->aH; j++)
+    {
+        for (i = 0; i < t->aW; i++)
+        {
+            memcpy(imgDataPtr, texDataPtr, imgPixelLen);
+            imgDataPtr += imgPixelLen;
+            texDataPtr += texPixelLen;
+        }
+        texDataPtr += texRowSkip;
+    }
     
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(
         NULL, (unsigned char*)pathBytes, strlen(pathBytes), false);
@@ -137,8 +204,9 @@ void saveFloatTexture(CGLContextObj cgl_ctx, GLuint tex, size_t w, size_t h, cha
     success = CFURLWriteDataAndPropertiesToResource(url, cfData, NULL, &errorCode);
     CHK_CFURL(success, errorCode);
     
-    printf("wrote texture as float dump: %s (%d x %d)\n", pathBytes, w, h);
+    printf("wrote texture as float dump: %s (%d x %d, %d channels)\n", pathBytes, t->aW, t->aH, t->aC);
     
+    free(texDataBase);
     CFRelease(cfData);
     CFRelease(url);
 }

@@ -10,7 +10,7 @@
  * configuration variables
  */
 
-GLfloat originXMult = 1024.;
+int originXMult = 4096;
 
 /*
  * common variables
@@ -92,7 +92,8 @@ texInfo* multiplyTiled(CGLContextObj cgl_ctx,
 
 texInfo* calcSO(CGLContextObj cgl_ctx,
     texInfo* sumD_sumD2_sumDr_T, texInfo* sumR_sumR2_T,
-    size_t n, size_t r_i, size_t r_j, GLfloat originXMult);
+    size_t n, size_t r_i, size_t r_j,
+    GLfloat originXMult);
 
 texInfo* searchReduce(CGLContextObj cgl_ctx,
     texInfo* srcT,
@@ -218,7 +219,7 @@ void loadGLResources(CGLContextObj cgl_ctx)
     zipperShader_BA_tex = glGetUniformLocation(zipperShader, "BA_tex");
     CHK_OGL;
     
-    /* multiplyTiled shader */
+    /* multiply a repeated range block with each domain block */
     multiplyTiledShader = loadProgram(cgl_ctx, "../src/common.vert", "../src/multiplyTiled.frag");
     multiplyTiledShader_w = glGetUniformLocation(multiplyTiledShader, "w");
     multiplyTiledShader_h = glGetUniformLocation(multiplyTiledShader, "h");
@@ -266,14 +267,19 @@ int main(int argc, char** argv)
     CHK_CGL(CGLCreateContext(pxlFmt, NULL, &cgl_ctx));
     CHK_CGL(CGLSetCurrentContext(cgl_ctx));
     
-    size_t d_size = 8 * 4;
-    size_t r_size = 4 * 4;
+    size_t d_size = 8;
+    size_t r_size = 4;
     
     /* load image to process */
     texInfo* srcImgT = createTextureFromPath(cgl_ctx, "../data/lena.png");
     srcImgT->aC = 1;
     fbW = srcImgT->w;
     fbH = srcImgT->h;
+    
+    printf("# orig_w = %d\n", fbW);
+    printf("# orig_h = %d\n", fbH);
+    printf("# d_size = %d\n", d_size);
+    printf("# r_size = %d\n", r_size);
     
     loadGLResources(cgl_ctx);
     
@@ -326,11 +332,12 @@ int main(int argc, char** argv)
             
             texInfo* rangeCandidates_T = calcSO(cgl_ctx,
                 sumD_sumD2_sumDr_T, sumR_sumR2_T,
-                r_size * r_size, r_i, r_j, originXMult);
+                r_size * r_size, r_i, r_j,
+                originXMult);
             
             texInfo* rangeTransform_T = searchReduce(cgl_ctx,
                 rangeCandidates_T,
-                1);
+                log2int(rangeCandidates_T->aW));
             
             GLfloat* transform = createTupleFromPointTexture(cgl_ctx, rangeTransform_T);
             
@@ -343,20 +350,22 @@ int main(int argc, char** argv)
             GLfloat MSE = transform[0];
             GLfloat s = transform[1];
             GLfloat o = transform[2];
-            size_t d_i = (size_t)(transform[3] / originXMult);
-            size_t d_j = (size_t)fmod(transform[3], originXMult);
-            free(transform);
+            GLfloat packedOrigin = transform[3];
             
-            printf("[%d : %d, %d : %d] = %f + %f * [%d : %d, %d : %d]\n",
+            size_t d_i = (size_t)    (transform[3] / originXMult) / 2;
+            size_t d_j = (size_t)fmod(transform[3],  originXMult) / 2;
+            
+            printf("[%03d : %03d, %03d : %03d] = % f + % f * [%03d : %03d, %03d : %03d]\n",
                 r_i * r_size, (r_i + 1) * r_size,
                 r_j * r_size, (r_j + 1) * r_size,
                 o, s,
                 d_i * d_size, (d_i + 1) * d_size,
                 d_j * d_size, (d_j + 1) * d_size);
+            
+            free(transform);
         }
     }
     
-    printf("ok\n");
     return EXIT_SUCCESS;
 }
 
@@ -381,7 +390,8 @@ GLfloat* createTupleFromPointTexture(CGLContextObj cgl_ctx,
 
 texInfo* calcSO(CGLContextObj cgl_ctx,
     texInfo* sumD_sumD2_sumDr_T, texInfo* sumR_sumR2_T,
-    size_t n, size_t r_i, size_t r_j, GLfloat originXMult)
+    size_t n, size_t r_i, size_t r_j,
+    GLfloat originXMult)
 {
     glUseProgram(calcSOShader);
     glUniform1i(calcSOShader_sumD_sumD2_sumDr_tex, 0 /* GL_TEXTURE0 */);
@@ -389,7 +399,7 @@ texInfo* calcSO(CGLContextObj cgl_ctx,
     glUniform1f(calcSOShader_n, n);
     glUniform1f(calcSOShader_r_i, r_i);
     glUniform1f(calcSOShader_r_j, r_j);
-    glUniform1f(calcSOShader_originXMult, originXMult);
+    glUniform1i(calcSOShader_originXMult, originXMult);
     CHK_OGL;
     
     texInfo* dstT = createEmptyTexture(cgl_ctx, GL_RGBA32F_ARB, fbW, fbH);

@@ -4,6 +4,7 @@ from math import *
 import struct
 import sys
 import os
+import re
 
 import numpy
 import Image
@@ -205,11 +206,9 @@ def window(A, c, d):
     b = A.max()
     return ((A - a) * (d - c) / (b - a) + c).clip(c, d)
 
-def encode():
-    d_size = 8 * 2
-    r_size = 4 * 2
-    
-    srcImg = readPILImage("../data/lena.png")[:, :, 0]
+def encode(filename, d_size, r_size):
+    srcImg = readPILImage(filename)[:, :, 0]
+    orig_h, orig_w = srcImg.shape
     
     R = srcImg
     sum_R = sumReduce(R, log2int(r_size))
@@ -247,50 +246,82 @@ def encode():
             P1, P2 = searchReduce(P1, P2, log2int(sum_D.shape[0]))
             err, s, o = P1[0, 0]
             _,   x, y = P2[0, 0]
-            transform = (i, j, s, o, int(x), int(y)) # range block, scale, offset, domain block
-            transforms.append(transform)
+            x = int(x)
+            y = int(y)
+            rs = [i * r_size, (i + 1) * r_size,
+                  j * r_size, (j + 1) * r_size]
+            ds = [x * d_size, (x + 1) * d_size,
+                  y * d_size, (y + 1) * d_size]
+            transforms.append((tuple(rs), o, s, tuple(ds)))
+        print "row %d / %d" % (j, sum_R.shape[0])
     
-    return transforms
+    return (orig_w, orig_h, d_size, r_size, transforms)
 
-def decode(transforms):
-    d_size = 8 * 2
-    r_size = 4 * 2
-    
-    dstShape = (256, 256)
-    
+transformAttrRE = re.compile(r'^#\s+(\w+)\s+=\s+(.*)$')
+transformLineRE = re.compile(r'^\[(\d+)\s+:\s+(\d+),\s+(\d+)\s+:\s+(\d+)\]\s+=\s+([-.\d]+)\s+\+\s+([-.\d]+)\s+\*\s+\[(\d+)\s+:\s+(\d+),\s+(\d+)\s+:\s+(\d+)\]$')
+
+def saveTransformList(filename, (orig_w, orig_h, d_size, r_size, transforms)):
+    f = open(filename, 'w')
+    f.write("# orig_w = %d\n" % orig_w)
+    f.write("# orig_h = %d\n" % orig_h)
+    f.write("# d_size = %d\n" % d_size)
+    f.write("# r_size = %d\n" % r_size)
+    for (rs, o, s, ds) in transforms:
+        f.write("[%03d : %03d, %03d : %03d] = % f + % f * [%03d : %03d, %03d : %03d]\n" \
+            % tuple(list(rs) + [o, s] + list(ds)))
+    f.close()
+
+def loadTransformList(filename):
+    transforms = []
+    for line in open(filename, 'r'):
+        if line.startswith('#'):
+            m = transformAttrRE.match(line)
+            k, v = m.groups()
+            if   k == 'orig_w':
+                orig_w = int(v)
+            elif k == 'orig_h':
+                orig_h = int(v)
+            elif k == 'd_size':
+                d_size = int(v)
+            elif k == 'r_size':
+                r_size = int(v)
+        else:
+            m = transformLineRE.match(line)
+            gs = list(m.groups())
+            rs = tuple(int(r) for r in gs[0:4])
+            o = float(gs[4])
+            s = float(gs[5])
+            ds = tuple(int(d) for d in gs[6:10])
+            transforms.append((rs, o, s, ds))
+    return (orig_w, orig_h, d_size, r_size, transforms)
+
+def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms)):
+    dstShape = (orig_w, orig_h)
     R = numpy.zeros(dstShape, numpy.dtype('f')) + 0.5 # makes it converge faster?
+    m = log2int(d_size) - log2int(r_size)
     
     for t in xrange(10):
-        D = avgReduce(R, log2int(d_size) - log2int(r_size))
+        D = avgReduce(R, m)
         R = numpy.empty(dstShape, numpy.dtype('f'))
-        for i, j, s, o, x, y in transforms:
-            p = D[
-                y * r_size : (y + 1) * r_size,
-                x * r_size : (x + 1) * r_size]
-            R[
-                j * r_size : (j + 1) * r_size,
-                i * r_size : (i + 1) * r_size] = s * p + o
+        for rs, o, s, ds in transforms:
+            dx1, dx2, dy1, dy2 = [d >> m for d in ds]
+            p = D[dy1 : dy2, dx1 : dx2]
+            rx1, rx2, ry1, ry2 = rs
+            R[ry1 : ry2, rx1 : rx2] = s * p + o
         
         print "iteration =", t
         print "min =", numpy.amin(R)
         print "max =", numpy.amax(R)
         print "avg =", numpy.mean(R)
+        writePILImage("%s_%02d.png" % (outputBasename, t), R)
         print
-        writePILImage("rcxn_%02d.png" % t, R)
-    
-    writePILImage("rcxn_last.png", window(R, 0, 1))
 
 def main():
-    transforms = encode()
-    decode(transforms)
+    #transformList = encode('../data/lena.png', 8, 4)
+    #saveTransformList('../build/Python-lena.trn', transformList)
+    transformList = loadTransformList('../data/Python-lena.trn')
+    decode('../build/Python-lena-out', transformList)
+    #transformList = loadTransformList('../data/OpenGL-lena.trn')
+    #decode('../build/OpenGL-enc-Python-dec-lena-out', transformList)
 
 main()
-
-def f2png(filename):
-    img = readFL32Image(filename)
-    print "min =", numpy.amin(img)
-    print "max =", numpy.amax(img)
-    print "avg =", numpy.mean(img)
-    print "stddev =", numpy.std(img)
-
-#f2png(sys.argv[1])

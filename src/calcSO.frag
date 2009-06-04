@@ -1,5 +1,5 @@
 const float epsilon = 0.0001;
-uniform float originXMult;
+uniform int originXMult;
 
 uniform sampler2DRect sumD_sumD2_sumDr_tex;
 uniform sampler2DRect sumR_sumR2_tex;
@@ -10,8 +10,8 @@ uniform float r_j;
 
 void main()
 {
-    vec2 tc = gl_TexCoord[0].st - vec2(0.5, 0.5);
-    float packedOrigin = tc.x * originXMult + tc.y;
+    vec2 tc = gl_TexCoord[0].st;
+    float packedOrigin = (tc.x * float(originXMult) + tc.y) * 2.0;
     
     vec4 PD = texture2DRect(sumD_sumD2_sumDr_tex, tc);
     float sumD  = PD.r;

@@ -270,32 +270,39 @@ int main(int argc, char** argv)
     size_t d_size;
     size_t r_size;
     char* trnOutPath;
-    if (argc < 2)
+    char* srcBase;
+    char* quality;
+    if (argc < 3)
     {
         ERR("not enough arguments", "");
     }
     else
     {
-        if      (strncmp("SD", argv[1], 3) == 0)
+        srcBase = argv[1];
+        quality = argv[2];
+        
+        if      (strncmp("SD", quality, 3) == 0)
         {        
             d_size = 8;
             r_size = 4;
-            trnOutPath = "OpenGL-lena.trn";
+            asprintf(&trnOutPath, "OpenGL-%s.trn", srcBase);
         }
-        else if (strncmp("HD", argv[1], 3) == 0)
+        else if (strncmp("HD", quality, 3) == 0)
         {        
             d_size = 4;
             r_size = 2;
-            trnOutPath = "OpenGL-lena-HD.trn";
+            asprintf(&trnOutPath, "OpenGL-%s-HD.trn", srcBase);
         }
         else
         {
-            ERR("bad quality argument", argv[1]);
+            ERR("bad quality argument", quality);
         }
     }
     
     /* load image to process */
-    texInfo* srcImgT = createTextureFromPath(cgl_ctx, "../data/lena.png");
+    char* srcPath;
+    asprintf(&srcPath, "../data/%s.png", srcBase);
+    texInfo* srcImgT = createTextureFromPath(cgl_ctx, srcPath);
     srcImgT->aC = 1;
     fbW = srcImgT->w;
     fbH = srcImgT->h;
@@ -396,6 +403,9 @@ int main(int argc, char** argv)
     }
     
     fclose(trnOutFile);
+    
+    free(srcPath);
+    free(trnOutPath);
     
     return EXIT_SUCCESS;
 }

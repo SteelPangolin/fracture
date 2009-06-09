@@ -315,35 +315,36 @@ def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms), magExp=
         print
 
 def main():
-    mode = sys.argv[1]
+    srcBase = sys.argv[1]
+    mode = sys.argv[2]
     if 'GL' in mode:
         if   'SD' in mode:
-            trnPath = '../build/OpenGL-lena.trn'
-            outBaseName = '../build/OpenGL-enc-Python-dec-lena-out'
+            trnPath = '../build/OpenGL-%s.trn' % srcBase
+            outBaseName = '../build/OpenGL-enc-Python-dec-%s-out' % srcBase
         elif 'HD' in mode:
-            trnPath = '../build/OpenGL-lena-HD.trn'
-            outBaseName = '../build/OpenGL-enc-Python-dec-lena-HD-out' 
+            trnPath = '../build/OpenGL-%s-HD.trn' % srcBase
+            outBaseName = '../build/OpenGL-enc-Python-dec-%s-HD-out' % srcBase
         transformList = loadTransformList(trnPath)
     else:
         if   'SD' in mode:
             d_size = 8
             r_size = 4
-            trnPath = '../build/Python-lena.trn'
-            outBaseName = '../build/Python-lena-out'
+            trnPath = '../build/Python-%s.trn' % srcBase
+            outBaseName = '../build/Python-%s-out' % srcBase
         elif 'HD' in mode:
             d_size = 4
             r_size = 2
-            trnPath = '../build/Python-lena-HD.trn'
-            outBaseName = '../build/Python-lena-HD-out'
+            trnPath = '../build/Python-%s-HD.trn' % srcBase
+            outBaseName = '../build/Python-%s-HD-out' % srcBase
         if os.path.exists(trnPath) and not 'ovw' in mode:
             transformList = loadTransformList(trnPath)
         else:
-            transformList = encode('../data/lena.png', d_size, r_size)
+            transformList = encode('../data/%s.png' % srcBase, d_size, r_size)
             saveTransformList(trnPath, transformList)
     
     if 'dec' in mode:
         if 'mag' in mode:
-            magExp = int(sys.argv[2])
+            magExp = int(sys.argv[3])
             decode(outBaseName + '-%dx' % (1 << magExp), transformList, magExp)
         else:
             decode(outBaseName, transformList)

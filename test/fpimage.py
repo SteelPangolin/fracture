@@ -5,6 +5,7 @@ import struct
 import sys
 import os
 import re
+import glob
 
 import numpy
 import Image
@@ -128,7 +129,7 @@ def avgReduce(A, times):
     
     return R
 
-def calcS(n, sum_D, sum_D2, sum_r, sum_rD):
+def calcSO(n, sum_D, sum_D2, sum_r, sum_r2, sum_rD):
     S_lo = n * sum_D2 + sum_D * sum_D
     # TODO: if abs(s_lo) is close to zero, special handling
     # see: Fisher, p. 21
@@ -136,70 +137,50 @@ def calcS(n, sum_D, sum_D2, sum_r, sum_rD):
     S = S_hi / S_lo
     # old 'cap' mode
     S = numpy.clip(S, -1 + 1E-4, 1 - 1E-4)
-    return S
-
-def calcO(n, sum_D, sum_r, S):
-    return (sum_r - S * sum_D) / n
-
-def calcMSE(n, sum_D, sum_D2, sum_r, sum_r2, sum_rD, S, O):
+    
+    O = (sum_r - S * sum_D) / n
+    
     SE = S * (S * sum_D2 + 2 * (O * sum_D - sum_rD)) \
         + O * (n * O - 2 * sum_r) \
         + sum_r2
-    return SE / n
-
-def calcMSEAlt(n, sum_D, sum_D2, sum_r, sum_r2, sum_rD, S, O):
-    # rearrange for speed
-    # see: Fisher, p. 21
-    SE = sum_r2 \
-        + S * S * sum_D2 \
-        + 2 * O * S * sum_D \
-        - 2 * S * sum_rD \
-        - 2 * O * sum_r \
-        + n * O * O
-    return SE / n
-
-def calcMSEAltSlow(r_size, n, r_tiled, D, S, O):
-    S_stretch = S.repeat(r_size, 0).repeat(r_size, 1)
-    O_stretch = O.repeat(r_size, 0).repeat(r_size, 1)
-    err = r_tiled - (S_stretch * D + O_stretch)
-    return avgReduce(err * err, log2int(r_size))
-
-def searchReduceCore(P1, P2):
-    R1 = numpy.empty((P1.shape[0] >> 1, P1.shape[1] >> 1, 3), numpy.dtype('f'))
-    R2 = numpy.empty((P2.shape[0] >> 1, P2.shape[1] >> 1, 3), numpy.dtype('f'))
+    MSE = SE / n
     
-    for j in xrange(R1.shape[0]):
-        for i in xrange(R1.shape[1]):
-            err,  s,  o  = P1[(j << 1),     (i << 1)]
-            _,    x,  y  = P2[(j << 1),     (i << 1)]
-            
-            err2, s2, o2 = P1[(j << 1) + 1, (i << 1)]
-            _,    x2, y2 = P2[(j << 1) + 1, (i << 1)]
-            if err2 < err:
-                err, s, o = (err2, s2, o2)
-                _,   x, y = (err2, x2, y2)
-            
-            err2, s2, o2 = P1[(j << 1),     (i << 1) + 1]
-            _,    x2, y2 = P2[(j << 1),     (i << 1) + 1]
-            if err2 < err:
-                err, s, o = (err2, s2, o2)
-                _,   x, y = (err2, x2, y2)
-            
-            err2, s2, o2 = P1[(j << 1) + 1, (i << 1) + 1]
-            _,    x2, y2 = P2[(j << 1) + 1, (i << 1) + 1]
-            if err2 < err:
-                err, s, o = (err2, s2, o2)
-                _,   x, y = (err2, x2, y2)
-            
-            R1[j, i] = (err2, s, o)
-            R2[j, i] = (err2, x, y)
-    
-    return (R1, R2)
+    return numpy.dstack((MSE, S, O))
 
-def searchReduce(P1, P2, times):
+def searchReduceCore(P):
+    R = numpy.empty((P.shape[0] >> 1, P.shape[1] >> 1, 5), numpy.dtype('f'))
+    
+    for j in xrange(R.shape[0]):
+        for i in xrange(R.shape[1]):
+            p  = P[(j << 1),     (i << 1)]
+            err = p[0]
+            
+            p2 = P[(j << 1) + 1, (i << 1)]
+            err2 = p2[0]
+            if err2 < err:
+                p = p2
+                err = err2
+            
+            p2 = P[(j << 1),     (i << 1) + 1]
+            err2 = p2[0]
+            if err2 < err:
+                p = p2
+                err = err2
+            
+            p2 = P[(j << 1) + 1, (i << 1) + 1]
+            err2 = p2[0]
+            if err2 < err:
+                p = p2
+                err = err2
+            
+            R[j, i] = p
+    
+    return R
+
+def searchReduce(P, times):
     for t in xrange(times):
-        P1, P2 = searchReduceCore(P1, P2)
-    return (P1, P2)
+        P = searchReduceCore(P)
+    return P
 
 def window(A, c, d):
     a = A.min()
@@ -237,15 +218,11 @@ def encode(filename, d_size, r_size):
             r_tiled = numpy.tile(r, (D.shape[0] / r_size, D.shape[1] / r_size))
             sum_rD = sumReduce(r_tiled * D, log2int(r_size))
             
-            S = calcS(n, sum_D, sum_D2, sum_R[j, i], sum_rD)
-            O = calcO(n, sum_D, sum_R[j, i], S)
-            MSE = calcMSE(n, sum_D, sum_D2, sum_R[j, i], sum_R2[j, i], sum_rD, S, O)
+            P_nocoords = calcSO(n, sum_D, sum_D2, sum_R[j, i], sum_R2[j, i], sum_rD)
             
-            P1 = numpy.dstack((MSE, S, O))
-            P2 = numpy.dstack((MSE, I, J))
-            P1, P2 = searchReduce(P1, P2, log2int(sum_D.shape[0]))
-            err, s, o = P1[0, 0]
-            _,   x, y = P2[0, 0]
+            P = numpy.dstack((P_nocoords, I, J))
+            P = searchReduce(P, log2int(sum_D.shape[0]))
+            err, s, o, x, y = P[0, 0]
             x = int(x)
             y = int(y)
             rs = [i * r_size, (i + 1) * r_size,
@@ -315,13 +292,33 @@ def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms)):
         print "avg =", numpy.mean(R)
         writePILImage("%s_%02d.png" % (outputBasename, t), R)
         print
+    
+    #R = window(R, 0, 1)
+    #writePILImage("%s_enhanced.png" % outputBasename, R)
 
 def main():
-    #transformList = encode('../data/lena.png', 8, 4)
-    #saveTransformList('../build/Python-lena.trn', transformList)
-    transformList = loadTransformList('../data/Python-lena.trn')
+    transformList = encode('../data/lena.png', 8, 4)
+    saveTransformList('../build/Python-lena.trn', transformList)
+    #transformList = loadTransformList('../data/Python-lena.trn')
     decode('../build/Python-lena-out', transformList)
-    #transformList = loadTransformList('../data/OpenGL-lena.trn')
+    #transformList = loadTransformList('../build/OpenGL-lena.trn')
     #decode('../build/OpenGL-enc-Python-dec-lena-out', transformList)
+
+def checkCandidates():
+    
+    def toRecord(a):
+        MSE, s, o, packedOrigin = a
+        d_i = int(packedOrigin / 4096) / 2
+        d_j = int(packedOrigin % 4096) / 2
+        return MSE, s, o, d_i, d_j
+    
+    for filePath in glob.iglob('../build/candidates/*.fl32'):
+        r_i, r_j = [int(r) for r in re.search(r'\[(\d+), (\d+)\]', filePath).groups()]
+        img = readFL32Image(filePath)
+        candidates = [toRecord(a) for a in img.reshape((img.shape[0] * img.shape[1], img.shape[2]))]
+        candidates.sort(cmp=lambda a, b: cmp(a[0], b[0]))
+        for candidate in candidates:
+            print candidate
+        break
 
 main()

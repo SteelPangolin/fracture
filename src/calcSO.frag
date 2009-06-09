@@ -29,7 +29,7 @@ void main()
         float S_hi = n * sumDr + sumR * sumD;
         S = clamp(S_hi / S_lo, -1.0 + epsilon, 1.0 - epsilon);
         O = (sumR - S * sumD) / n;
-        squaredError = S * (S * sumD2 + (2.0 * (O * sumD - sumDr)));
+        squaredError = S * (S * sumD2 + 2.0 * (O * sumD - sumDr));
     }
     else
     {

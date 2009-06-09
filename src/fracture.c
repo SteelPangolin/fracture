@@ -335,6 +335,11 @@ int main(int argc, char** argv)
                 r_size * r_size, r_i, r_j,
                 originXMult);
             
+            char* dumpFileName;
+            asprintf(&dumpFileName, "candidates/rangeCandidates_T[%02d, %02d].fl32", r_i, r_j);
+            saveFloatTexture(cgl_ctx, rangeCandidates_T, dumpFileName);
+            free(dumpFileName);
+            
             texInfo* rangeTransform_T = searchReduce(cgl_ctx,
                 rangeCandidates_T,
                 log2int(rangeCandidates_T->aW));

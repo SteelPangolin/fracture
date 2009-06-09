@@ -129,21 +129,35 @@ def avgReduce(A, times):
     
     return R
 
-def calcSO(n, sum_D, sum_D2, sum_r, sum_r2, sum_rD):
+epsilon = 0.0001
+
+def calcSO(n, sum_D, sum_D2, sum_r, sum_r2, sum_Dr):
     S_lo = n * sum_D2 + sum_D * sum_D
-    # TODO: if abs(s_lo) is close to zero, special handling
-    # see: Fisher, p. 21
-    S_hi = n * sum_rD + sum_r * sum_D
-    S = S_hi / S_lo
-    # old 'cap' mode
-    S = numpy.clip(S, -1 + 1E-4, 1 - 1E-4)
     
-    O = (sum_r - S * sum_D) / n
+    S = numpy.zeros_like(S_lo)
+    O = numpy.empty_like(S_lo)
+    squaredError = numpy.zeros_like(S_lo)
     
-    SE = S * (S * sum_D2 + 2 * (O * sum_D - sum_rD)) \
-        + O * (n * O - 2 * sum_r) \
-        + sum_r2
-    MSE = SE / n
+    for j in xrange(S_lo.shape[0]):
+        for i in xrange(S_lo.shape[1]):
+            s_lo = S_lo[j, i]
+            if abs(s_lo) > epsilon:
+                sum_d  = sum_D[j, i]
+                sum_dr = sum_Dr[j, i]
+                
+                s_hi = n * sum_dr + sum_r * sum_d
+                s = numpy.clip(s_hi / s_lo, -1 + epsilon, 1 - epsilon)
+                S[j, i] = s
+                
+                o = (sum_r - s * sum_d) / n
+                O[j, i] = o
+                
+                squaredError[j, i] += s * (s * sum_D2[j, i] + 2 * (o * sum_d - sum_dr))
+            else:
+                O[j, i] = sum_r / n
+    
+    squaredError += sum_r2 + O * (n * O - 2 * sum_r)
+    MSE = squaredError / n
     
     return numpy.dstack((MSE, S, O))
 
@@ -216,9 +230,9 @@ def encode(filename, d_size, r_size):
                 j * r_size : (j + 1) * r_size,
                 i * r_size : (i + 1) * r_size]
             r_tiled = numpy.tile(r, (D.shape[0] / r_size, D.shape[1] / r_size))
-            sum_rD = sumReduce(r_tiled * D, log2int(r_size))
+            sum_Dr = sumReduce(r_tiled * D, log2int(r_size))
             
-            P_nocoords = calcSO(n, sum_D, sum_D2, sum_R[j, i], sum_R2[j, i], sum_rD)
+            P_nocoords = calcSO(n, sum_D, sum_D2, sum_R[j, i], sum_R2[j, i], sum_Dr)
             
             P = numpy.dstack((P_nocoords, I, J))
             P = searchReduce(P, log2int(sum_D.shape[0]))
@@ -230,7 +244,7 @@ def encode(filename, d_size, r_size):
             ds = [x * d_size, (x + 1) * d_size,
                   y * d_size, (y + 1) * d_size]
             transforms.append((tuple(rs), o, s, tuple(ds)))
-        print "row %d / %d" % (j, sum_R.shape[0])
+        print "row %d / %d" % (1 + j, sum_R.shape[0])
     
     return (orig_w, orig_h, d_size, r_size, transforms)
 

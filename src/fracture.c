@@ -267,8 +267,32 @@ int main(int argc, char** argv)
     CHK_CGL(CGLCreateContext(pxlFmt, NULL, &cgl_ctx));
     CHK_CGL(CGLSetCurrentContext(cgl_ctx));
     
-    size_t d_size = 8;
-    size_t r_size = 4;
+    size_t d_size;
+    size_t r_size;
+    char* trnOutPath;
+    if (argc < 2)
+    {
+        ERR("not enough arguments", "");
+    }
+    else
+    {
+        if      (strncmp("SD", argv[1], 3) == 0)
+        {        
+            d_size = 8;
+            r_size = 4;
+            trnOutPath = "OpenGL-lena.trn";
+        }
+        else if (strncmp("HD", argv[1], 3) == 0)
+        {        
+            d_size = 4;
+            r_size = 2;
+            trnOutPath = "OpenGL-lena-HD.trn";
+        }
+        else
+        {
+            ERR("bad quality argument", argv[1]);
+        }
+    }
     
     /* load image to process */
     texInfo* srcImgT = createTextureFromPath(cgl_ctx, "../data/lena.png");
@@ -276,10 +300,13 @@ int main(int argc, char** argv)
     fbW = srcImgT->w;
     fbH = srcImgT->h;
     
-    printf("# orig_w = %d\n", fbW);
-    printf("# orig_h = %d\n", fbH);
-    printf("# d_size = %d\n", d_size);
-    printf("# r_size = %d\n", r_size);
+    FILE* trnOutFile = fopen(trnOutPath, "w");
+    CHK_NULL(trnOutFile, "fopen() failed", trnOutPath);
+    
+    fprintf(trnOutFile, "# orig_w = %d\n", fbW);
+    fprintf(trnOutFile, "# orig_h = %d\n", fbH);
+    fprintf(trnOutFile, "# d_size = %d\n", d_size);
+    fprintf(trnOutFile, "# r_size = %d\n", r_size);
     
     loadGLResources(cgl_ctx);
     
@@ -335,11 +362,6 @@ int main(int argc, char** argv)
                 r_size * r_size, r_i, r_j,
                 originXMult);
             
-            char* dumpFileName;
-            asprintf(&dumpFileName, "candidates/rangeCandidates_T[%02d, %02d].fl32", r_i, r_j);
-            saveFloatTexture(cgl_ctx, rangeCandidates_T, dumpFileName);
-            free(dumpFileName);
-            
             texInfo* rangeTransform_T = searchReduce(cgl_ctx,
                 rangeCandidates_T,
                 log2int(rangeCandidates_T->aW));
@@ -360,7 +382,7 @@ int main(int argc, char** argv)
             size_t d_i = (size_t)    (transform[3] / originXMult) / 2;
             size_t d_j = (size_t)fmod(transform[3],  originXMult) / 2;
             
-            printf("[%03d : %03d, %03d : %03d] = % f + % f * [%03d : %03d, %03d : %03d]\n",
+            fprintf(trnOutFile, "[%03d : %03d, %03d : %03d] = % f + % f * [%03d : %03d, %03d : %03d]\n",
                 r_i * r_size, (r_i + 1) * r_size,
                 r_j * r_size, (r_j + 1) * r_size,
                 o, s,
@@ -369,7 +391,11 @@ int main(int argc, char** argv)
             
             free(transform);
         }
+        
+        printf("row %d / %d\n", 1 + r_j, R_T->aH / r_size);
     }
+    
+    fclose(trnOutFile);
     
     return EXIT_SUCCESS;
 }

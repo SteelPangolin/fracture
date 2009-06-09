@@ -53,7 +53,7 @@ def writeFL32Image(filename, data):
         numChannels = 1
     else:
         height, width, numChannels = data.shape
-    data = numpy.asarray(data, numpy.dtype('<f'))
+    data = numpy.asarray(data, numpy.dtype('<f'), 'C')
     buf = numpy.getbuffer(data)
     
     sig = "23lf"
@@ -81,21 +81,24 @@ def readPILImage(filename):
     return data
 
 def writePILImage(filename, data):
-    data = data * 255.0 # intentional, copy for output
     if len(data.shape) == 2:
         height, width = data.shape
         numChannels = 1
     else:
         height, width, numChannels = data.shape
-    data = numpy.asarray(data, numpy.dtype('B'))
-    buf = numpy.getbuffer(data)
     
     if numChannels == 1:
         mode = 'L'
     elif numChannels == 4:
         mode = 'RGBA'
     else:
-        raise Exception()
+        mode = 'RGBA'
+        pad = numpy.ones((height, width, 4 - numChannels))
+        data = numpy.dstack((data, pad))
+    
+    data = numpy.asarray(data * 255, numpy.dtype('B'))
+    buf = numpy.getbuffer(data)
+    
     img = Image.frombuffer(mode, (width, height), buf, 'raw', mode, 0, 1)
     img.save(filename)
     
@@ -286,8 +289,8 @@ def loadTransformList(filename):
             transforms.append((rs, o, s, ds))
     return (orig_w, orig_h, d_size, r_size, transforms)
 
-def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms)):
-    dstShape = (orig_w, orig_h)
+def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms), magExp=0):
+    dstShape = (orig_w << magExp, orig_h << magExp)
     R = numpy.zeros(dstShape, numpy.dtype('f')) + 0.5 # makes it converge faster?
     m = log2int(d_size) - log2int(r_size)
     
@@ -295,9 +298,13 @@ def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms)):
         D = avgReduce(R, m)
         R = numpy.empty(dstShape, numpy.dtype('f'))
         for rs, o, s, ds in transforms:
-            dx1, dx2, dy1, dy2 = [d >> m for d in ds]
+            z = magExp - m
+            if z > 0:
+                dx1, dx2, dy1, dy2 = [d <<  z for d in ds]
+            else:
+                dx1, dx2, dy1, dy2 = [d >> -z for d in ds]
             p = D[dy1 : dy2, dx1 : dx2]
-            rx1, rx2, ry1, ry2 = rs
+            rx1, rx2, ry1, ry2 = [r << magExp for r in rs]
             R[ry1 : ry2, rx1 : rx2] = s * p + o
         
         print "iteration =", t
@@ -306,33 +313,45 @@ def decode(outputBasename, (orig_w, orig_h, d_size, r_size, transforms)):
         print "avg =", numpy.mean(R)
         writePILImage("%s_%02d.png" % (outputBasename, t), R)
         print
-    
-    #R = window(R, 0, 1)
-    #writePILImage("%s_enhanced.png" % outputBasename, R)
 
 def main():
-    transformList = encode('../data/lena.png', 8, 4)
-    saveTransformList('../build/Python-lena.trn', transformList)
-    #transformList = loadTransformList('../data/Python-lena.trn')
-    decode('../build/Python-lena-out', transformList)
-    #transformList = loadTransformList('../build/OpenGL-lena.trn')
-    #decode('../build/OpenGL-enc-Python-dec-lena-out', transformList)
+    mode = sys.argv[1]
+    if 'GL' in mode:
+        if   'SD' in mode:
+            trnPath = '../build/OpenGL-lena.trn'
+            outBaseName = '../build/OpenGL-enc-Python-dec-lena-out'
+        elif 'HD' in mode:
+            trnPath = '../build/OpenGL-lena-HD.trn'
+            outBaseName = '../build/OpenGL-enc-Python-dec-lena-HD-out' 
+        transformList = loadTransformList(trnPath)
+    else:
+        if   'SD' in mode:
+            d_size = 8
+            r_size = 4
+            trnPath = '../build/Python-lena.trn'
+            outBaseName = '../build/Python-lena-out'
+        elif 'HD' in mode:
+            d_size = 4
+            r_size = 2
+            trnPath = '../build/Python-lena-HD.trn'
+            outBaseName = '../build/Python-lena-HD-out'
+        if os.path.exists(trnPath) and not 'ovw' in mode:
+            transformList = loadTransformList(trnPath)
+        else:
+            transformList = encode('../data/lena.png', d_size, r_size)
+            saveTransformList(trnPath, transformList)
+    
+    if 'dec' in mode:
+        if 'mag' in mode:
+            magExp = int(sys.argv[2])
+            decode(outBaseName + '-%dx' % (1 << magExp), transformList, magExp)
+        else:
+            decode(outBaseName, transformList)
 
-def checkCandidates():
-    
-    def toRecord(a):
-        MSE, s, o, packedOrigin = a
-        d_i = int(packedOrigin / 4096) / 2
-        d_j = int(packedOrigin % 4096) / 2
-        return MSE, s, o, d_i, d_j
-    
-    for filePath in glob.iglob('../build/candidates/*.fl32'):
-        r_i, r_j = [int(r) for r in re.search(r'\[(\d+), (\d+)\]', filePath).groups()]
-        img = readFL32Image(filePath)
-        candidates = [toRecord(a) for a in img.reshape((img.shape[0] * img.shape[1], img.shape[2]))]
-        candidates.sort(cmp=lambda a, b: cmp(a[0], b[0]))
-        for candidate in candidates:
-            print candidate
-        break
+def fl32ToPNG():
+    inPath = sys.argv[1]
+    outPath = os.path.splitext(inPath)[0] + '.png'
+    img = readFL32Image(inPath)
+    writePILImage(outPath, window(img, 0, 1))
 
 main()

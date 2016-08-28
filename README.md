@@ -7,7 +7,7 @@ Fracture is a [fractal image encoder](https://steelpangolin.wordpress.com/2014/0
 Here's Lena after being reduced 2✕ and then enlarged 2✕. Note where the conventional upscaler's output is blurry, Fracture's output preserves lines and texture.
 
 original | conventional upscaler | Fracture software encoder | Fracture GPU encoder
-- | - | - | -
+--- | --- | --- | ---
 ![Lena (original)](data/lena_256x256.png) | ![Lena (conventional upscaler)](docs/conventional-upscaler-lena.png) | ![Lena (Fracture software encoder)](docs/Python-lena-out_09.png) | ![Lena (Fracture GPU encoder)](docs/OpenGL-enc-Python-dec-lena-out_09.png)
 
 See [my presentation on "GPU-accelerated fractal imaging"](docs/CS%2081.pptx.pdf) for more of what Fracture can do.
